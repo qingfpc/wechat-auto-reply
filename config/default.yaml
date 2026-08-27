@@ -1,0 +1,31 @@
+mode: copilot          # copilot | auto
+hotkey: "<ctrl>+<alt>+w"
+poll_seconds: 30
+host: 127.0.0.1
+port: 8765
+
+# 全自动默认先空跑：只拟稿入库，不真的点发送。界面里关掉 dry_run 才会发出。
+dry_run: true
+
+llm:
+  base_url: ""         # 空则读环境变量 OPENAI_BASE_URL
+  api_key: ""          # 空则读 OPENAI_API_KEY
+  model: gpt-4o-mini
+
+adb:
+  path: ""             # 空则从 PATH 找 adb；可填 platform-tools 目录或 adb.exe
+  serial: ""
+  package: com.tencent.mm
+
+layout:
+  input: [0.50, 0.93]
+  send: [0.90, 0.93]
+  unread_region: [0.02, 0.12, 0.22, 0.88]   # left top right bottom, 比例
+  incoming_max_x: 0.48
+  outgoing_min_x: 0.52
+
+policy:
+  auto_scenes:
+    - smalltalk
+    - logistics
+  max_auto_per_hour: 20

@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>夜班台 · 微信拟稿</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=ZCOOL+XiaoWei&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/app.css" />
+</head>
+<body>
+  <div class="grain"></div>
+  <header class="top">
+    <div>
+      <p class="kicker">NIGHT DESK / CH.8765</p>
+      <h1>夜班台</h1>
+    </div>
+    <div class="mode-switch" id="modeSwitch">
+      <button data-mode="copilot" class="on">快捷键拟稿</button>
+      <button data-mode="auto">OCR+ADB 全自动</button>
+    </div>
+  </header>
+
+  <section class="status-row">
+    <article class="lamp" id="lamp">
+      <span class="dot"></span>
+      <div>
+        <strong id="modeLabel">拟稿</strong>
+        <p id="modeHint">Ctrl+Alt+W 抓当前微信窗口或剪贴板</p>
+      </div>
+    </article>
+    <article>
+      <strong>ADB</strong>
+      <p id="adbLine">检测中…</p>
+    </article>
+    <article>
+      <strong>模型</strong>
+      <p id="llmLine">规则拟稿</p>
+    </article>
+    <label class="arm">
+      <input type="checkbox" id="dryRun" checked />
+      空跑（不真发）
+    </label>
+    <label class="arm danger">
+      <input type="checkbox" id="armed" />
+      解除保险
+    </label>
+  </section>
+
+  <main class="grid">
+    <section class="panel compose">
+      <h2>丢一段对话进来</h2>
+      <textarea id="source" placeholder="对方: 今晚还出不出来&#10;我: 我看一下"></textarea>
+      <div class="row">
+        <input id="contact" placeholder="联系人（可选）" />
+        <button class="primary" id="draftBtn">生成草稿</button>
+      </div>
+      <p class="fine">拟稿模式：把微信置于前台，按 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>W</kbd>。全自动模式：手机开 USB 调试，微信停在聊天列表。</p>
+    </section>
+
+    <section class="panel queue">
+      <h2>待确认</h2>
+      <div id="queue" class="queue-list"></div>
+    </section>
+
+    <section class="panel side">
+      <h2>末帧</h2>
+      <img id="shot" alt="最近一次截屏" />
+      <h2>日志</h2>
+      <ol id="log" class="log"></ol>
+    </section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>
