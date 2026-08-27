@@ -6,6 +6,7 @@ from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QCloseEvent, QGuiApplication, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -29,76 +30,132 @@ from PySide6.QtWidgets import (
 )
 
 from wechat_draft_brain.brain import SCENE_LABELS
-from wechat_draft_brain.config import load_config, save_user_settings
+from wechat_draft_brain.config import CAPTURE_CHOICES, THEME_CHOICES, load_config, normalize_theme, save_user_settings
 from wechat_draft_brain.paths import LAST_SHOT, USER_CONFIG, DATA_DIR, icon_path
 from wechat_draft_brain.pipeline import ingest_text, reload_config, restart_hotkeys
 from wechat_draft_brain.store import init_db, list_drafts, list_events, update_draft
 
-STYLESHEET = """
-QMainWindow, QDialog, QWidget#root {
-  background: #14110e;
-  color: #efe6d4;
+_THEME_COLORS = {
+    "dark": {
+        "bg": "#14110e",
+        "paper": "#1c1813",
+        "ink": "#efe6d4",
+        "mute": "#9a8f7c",
+        "line": "#3a332a",
+        "input": "#12100d",
+        "accent": "#c9d4a2",
+        "accent_ink": "#0b0907",
+        "danger": "#d45b3e",
+        "shot": "#0d0b09",
+    },
+    "light": {
+        "bg": "#f3eee6",
+        "paper": "#fffdf8",
+        "ink": "#1c1813",
+        "mute": "#6f675c",
+        "line": "#d4cbbe",
+        "input": "#ffffff",
+        "accent": "#5e6b38",
+        "accent_ink": "#f7f4ea",
+        "danger": "#c4452f",
+        "shot": "#ece6db",
+    },
+}
+
+_STYLE_TEMPLATE = """
+QMainWindow, QDialog, QWidget#root {{
+  background: {bg};
+  color: {ink};
   font-family: "Microsoft YaHei UI", "Segoe UI", sans-serif;
   font-size: 13px;
-}
-QLabel { color: #efe6d4; }
-QLabel#kicker {
-  color: #9a8f7c;
+}}
+QLabel {{ color: {ink}; }}
+QLabel#kicker {{
+  color: {mute};
   letter-spacing: 3px;
   font-size: 11px;
-}
-QLabel#title {
+}}
+QLabel#title {{
   font-size: 28px;
   font-weight: 400;
   letter-spacing: 4px;
-}
-QLabel#mute, QLabel#meta, QLabel#fine { color: #9a8f7c; }
-QLabel#risk { color: #d45b3e; }
-QFrame#card, QFrame#panel, QFrame#stat {
-  background: #1c1813;
-  border: 1px solid #3a332a;
-}
-QTextEdit, QLineEdit {
-  background: #12100d;
-  color: #efe6d4;
-  border: 1px solid #3a332a;
+}}
+QLabel#mute, QLabel#meta, QLabel#fine {{ color: {mute}; }}
+QLabel#risk {{ color: {danger}; }}
+QLabel#shot {{
+  color: {mute};
+  background: {shot};
+  border: 1px solid {line};
+}}
+QFrame#card, QFrame#panel, QFrame#stat {{
+  background: {paper};
+  border: 1px solid {line};
+}}
+QTextEdit, QLineEdit, QComboBox {{
+  background: {input};
+  color: {ink};
+  border: 1px solid {line};
   padding: 8px;
-  selection-background-color: #3a332a;
-}
-QPushButton {
-  background: #12100d;
-  color: #efe6d4;
-  border: 1px solid #3a332a;
+  selection-background-color: {line};
+}}
+QComboBox QAbstractItemView {{
+  background: {paper};
+  color: {ink};
+  selection-background-color: {line};
+}}
+QPushButton {{
+  background: {input};
+  color: {ink};
+  border: 1px solid {line};
   padding: 8px 12px;
-}
-QPushButton:hover { border-color: #c9d4a2; }
-QPushButton#primary {
-  background: #c9d4a2;
-  color: #0b0907;
+}}
+QPushButton:hover {{ border-color: {accent}; }}
+QPushButton#primary {{
+  background: {accent};
+  color: {accent_ink};
   border: 0;
   font-weight: 600;
-}
-QPushButton#ghost { color: #9a8f7c; }
-QListWidget {
-  background: #1c1813;
-  color: #9a8f7c;
+}}
+QPushButton#ghost {{ color: {mute}; }}
+QFrame#card QPushButton {{
+  text-align: left;
+}}
+QListWidget {{
+  background: {paper};
+  color: {mute};
   border: 0;
   font-size: 12px;
-}
-QScrollArea { border: 0; background: transparent; }
-QScrollBar:vertical {
-  background: #14110e;
+}}
+QScrollArea {{ border: 0; background: transparent; }}
+QScrollBar:vertical {{
+  background: {bg};
   width: 10px;
   border: 0;
-}
-QScrollBar::handle:vertical { background: #3a332a; min-height: 24px; }
-QMenu {
-  background: #1c1813;
-  color: #efe6d4;
-  border: 1px solid #3a332a;
-}
-QMenu::item:selected { background: #3a332a; }
+}}
+QScrollBar::handle:vertical {{ background: {line}; min-height: 24px; }}
+QMenu {{
+  background: {paper};
+  color: {ink};
+  border: 1px solid {line};
+}}
+QMenu::item:selected {{ background: {line}; }}
+QDialogButtonBox QPushButton {{
+  min-width: 72px;
+}}
 """
+
+
+def stylesheet_for(theme: str | None = None) -> str:
+    key = normalize_theme(theme)
+    return _STYLE_TEMPLATE.format(**_THEME_COLORS[key])
+
+
+def apply_theme(theme: str | None = None) -> str:
+    theme = normalize_theme(theme if theme is not None else load_config().get("theme"))
+    app = QApplication.instance()
+    if app is not None:
+        app.setStyleSheet(stylesheet_for(theme))
+    return theme
 
 
 class Worker(QThread):
@@ -125,6 +182,18 @@ class SettingsDialog(QDialog):
         llm = cfg.get("llm") or {}
         form = QFormLayout(self)
         self.hotkey = QLineEdit(str(cfg.get("hotkey") or "<ctrl>+<alt>+w"))
+        self.capture = QComboBox()
+        current_capture = cfg.get("capture") or "ocr"
+        for value, label in CAPTURE_CHOICES:
+            self.capture.addItem(label, value)
+        idx = self.capture.findData(current_capture)
+        self.capture.setCurrentIndex(idx if idx >= 0 else 0)
+        self.theme = QComboBox()
+        current_theme = cfg.get("theme") or "dark"
+        for value, label in THEME_CHOICES:
+            self.theme.addItem(label, value)
+        tidx = self.theme.findData(current_theme)
+        self.theme.setCurrentIndex(tidx if tidx >= 0 else 0)
         self.base_url = QLineEdit(str(llm.get("base_url") or ""))
         self.api_key = QLineEdit(str(llm.get("api_key") or ""))
         self.api_key.setEchoMode(QLineEdit.Password)
@@ -133,6 +202,8 @@ class SettingsDialog(QDialog):
         hint.setObjectName("fine")
         hint.setWordWrap(True)
         form.addRow("快捷键", self.hotkey)
+        form.addRow("快捷键读取", self.capture)
+        form.addRow("外观", self.theme)
         form.addRow("接口地址", self.base_url)
         form.addRow("API Key", self.api_key)
         form.addRow("模型", self.model)
@@ -148,9 +219,12 @@ class SettingsDialog(QDialog):
             api_key=self.api_key.text(),
             base_url=self.base_url.text(),
             model=self.model.text(),
+            capture=str(self.capture.currentData() or "ocr"),
+            theme=str(self.theme.currentData() or "dark"),
         )
         reload_config()
         restart_hotkeys()
+        apply_theme()
 
 
 class DraftCard(QFrame):
@@ -180,7 +254,6 @@ class DraftCard(QFrame):
             layout.addWidget(preview)
         for text in row.get("drafts") or []:
             btn = QPushButton(text)
-            btn.setStyleSheet("text-align: left;")
             btn.clicked.connect(lambda _, t=text: self.copy_text(t))
             layout.addWidget(btn)
         dismiss = QPushButton("丢掉")
@@ -236,7 +309,7 @@ class MainWindow(QMainWindow):
         outer.addLayout(header)
 
         stats = QHBoxLayout()
-        self.hint = self._stat("快捷键拟稿", "Ctrl+Alt+W 抓剪贴板或前台窗口")
+        self.hint = self._stat("快捷键拟稿", "Ctrl+Alt+W 只 OCR 当前窗口")
         self.model_line = self._stat("模型", "规则拟稿")
         stats.addWidget(self.hint)
         stats.addWidget(self.model_line)
@@ -290,7 +363,7 @@ class MainWindow(QMainWindow):
         row.addWidget(self.contact)
         row.addWidget(self.draft_btn)
         lay.addLayout(row)
-        fine = QLabel("把微信置于前台，按 Ctrl+Alt+W。点一条草稿即复制，再粘回微信发送。")
+        fine = QLabel("把微信置于前台，按 Ctrl+Alt+W。默认只 OCR 聊天区，不读剪贴板。点一条草稿即复制。")
         fine.setObjectName("fine")
         fine.setWordWrap(True)
         lay.addWidget(fine)
@@ -317,11 +390,10 @@ class MainWindow(QMainWindow):
         lay = QVBoxLayout(panel)
         lay.addWidget(QLabel("末帧"))
         self.shot = QLabel("还没有截屏")
-        self.shot.setObjectName("mute")
+        self.shot.setObjectName("shot")
         self.shot.setAlignment(Qt.AlignCenter)
         self.shot.setMinimumHeight(160)
         self.shot.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.shot.setStyleSheet("background:#0d0b09; border:1px solid #3a332a;")
         lay.addWidget(self.shot, 1)
         lay.addWidget(QLabel("日志"))
         self.log = QListWidget()
@@ -395,7 +467,14 @@ class MainWindow(QMainWindow):
         from wechat_draft_brain.pipeline import current_flags
 
         flags = current_flags()
-        self.hint.body.setText(f"{flags['hotkey']} 抓剪贴板或前台窗口，只出草稿不发送。")
+        capture = flags.get("capture") or "ocr"
+        if capture == "clipboard":
+            hint = f"{flags['hotkey']} 只读剪贴板，只出草稿不发送。"
+        elif capture == "both":
+            hint = f"{flags['hotkey']} 先 OCR 窗口，没有字再用剪贴板。"
+        else:
+            hint = f"{flags['hotkey']} 只 OCR 当前窗口聊天区，不读剪贴板。"
+        self.hint.body.setText(hint)
         self.model_line.body.setText(
             flags["model"] if flags["llm_ready"] else "未配置 API Key，走规则拟稿"
         )
@@ -409,6 +488,7 @@ class MainWindow(QMainWindow):
             flags["hotkey"],
             flags["llm_ready"],
             flags["model"],
+            flags.get("capture"),
         )
         newest = drafts[0]["id"] if drafts else 0
         if self._ready and newest > self._last_id and drafts and drafts[0].get("status") == "pending":
@@ -488,7 +568,7 @@ def run() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName("夜班台")
     app.setQuitOnLastWindowClosed(False)
-    app.setStyleSheet(STYLESHEET)
+    apply_theme()
     ico = icon_path()
     if ico.exists():
         app.setWindowIcon(QIcon(str(ico)))

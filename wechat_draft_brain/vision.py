@@ -7,6 +7,8 @@ from typing import Any
 import numpy as np
 from PIL import Image, ImageGrab
 
+from wechat_draft_brain.config import normalize_capture
+
 _ocr = None
 
 
@@ -77,9 +79,42 @@ def find_red_badges(image: Image.Image, region: tuple[float, float, float, float
     return points
 
 
+def chat_pane_box(
+    width: int,
+    height: int,
+    layout: dict | None = None,
+    dpi: float = 1.0,
+) -> tuple[int, int, int, int]:
+    """微信 PC 左侧是图标栏+会话列表，只保留右侧聊天区。"""
+    layout = layout or {}
+    sidebar_px = float(layout.get("sidebar_px", 360))
+    left = int(round(sidebar_px * max(float(dpi) or 1.0, 0.75)))
+    max_left = int(width * float(layout.get("sidebar_max_ratio", 0.42)))
+    left = min(max(left, 0), max_left, max(width - 80, 0))
+    top = int(height * float(layout.get("chat_top", 0.0)))
+    right = int(width * float(layout.get("chat_right", 1.0)))
+    bottom = int(height * float(layout.get("chat_bottom", 0.90)))
+    if right - left < 80:
+        right = width
+    if bottom - top < 80:
+        bottom = height
+    return left, top, right, min(bottom, height)
+
+
+def crop_chat_pane(
+    image: Image.Image,
+    layout: dict | None = None,
+    dpi: float = 1.0,
+) -> Image.Image:
+    left, top, right, bottom = chat_pane_box(image.size[0], image.size[1], layout, dpi)
+    if left <= 0 and top <= 0 and right >= image.size[0] and bottom >= image.size[1]:
+        return image
+    return image.crop((left, top, right, bottom))
+
+
 def parse_chat(items: list[dict[str, Any]], width: int, incoming_max_x: float, outgoing_min_x: float) -> str:
     lines = []
-    skip = ("发送", "按住 说话", "搜一搜", "视频通话", "语音通话")
+    skip = ("发送", "按住 说话", "搜一搜", "视频通话", "语音通话", "搜索")
     for it in items:
         text = it["text"]
         if not text or any(s in text for s in skip):
@@ -97,10 +132,16 @@ def parse_chat(items: list[dict[str, Any]], width: int, incoming_max_x: float, o
 
 
 def guess_title(items: list[dict[str, Any]], width: int, height: int) -> str:
+    skip = {"微信", "搜索", "聊天", "通讯录"}
     for it in items:
-        if it["top"] < height * 0.12 and 0.18 * width < it["x"] < 0.82 * width:
-            if 1 < len(it["text"]) < 20:
-                return it["text"]
+        if it["top"] >= height * 0.14:
+            continue
+        if not (0.04 * width < it["x"] < 0.62 * width):
+            continue
+        text = it["text"]
+        if text in skip or not (1 < len(text) < 20):
+            continue
+        return text
     return ""
 
 
@@ -113,30 +154,58 @@ def clipboard_text() -> str:
         return ""
 
 
-def grab_foreground_window() -> Image.Image | None:
+def _window_dpi(hwnd: int) -> float:
+    try:
+        dpi = int(ctypes.windll.user32.GetDpiForWindow(hwnd))
+        if dpi > 0:
+            return dpi / 96.0
+    except Exception:
+        pass
+    return 1.0
+
+
+def grab_foreground_window() -> tuple[Image.Image | None, float]:
     user32 = ctypes.windll.user32
     hwnd = user32.GetForegroundWindow()
     if not hwnd:
-        return None
+        return None, 1.0
     rect = wintypes.RECT()
     if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
-        return None
+        return None, 1.0
     bbox = (rect.left, rect.top, rect.right, rect.bottom)
     if bbox[2] - bbox[0] < 80 or bbox[3] - bbox[1] < 80:
-        return None
-    return ImageGrab.grab(bbox=bbox)
+        return None, 1.0
+    return ImageGrab.grab(bbox=bbox), _window_dpi(int(hwnd))
 
 
-def capture_context(prefer_clipboard: bool = True) -> tuple[str, Image.Image | None]:
-    clip = clipboard_text() if prefer_clipboard else ""
-    image = grab_foreground_window()
-    if clip and len(clip) >= 2:
-        return clip, image
-    if image is None:
-        return "", None
-    items = ocr_image(image)
-    title = guess_title(items, image.size[0], image.size[1])
-    body = parse_chat(items, image.size[0], 0.48, 0.52)
-    if title and body:
-        return f"[会话] {title}\n{body}", image
-    return body or title, image
+def select_capture_text(*, ocr: str, clipboard: str, source: str) -> str:
+    source = normalize_capture(source)
+    ocr = (ocr or "").strip()
+    clipboard = (clipboard or "").strip()
+    if source == "clipboard":
+        return clipboard
+    if source == "both":
+        return ocr or clipboard
+    return ocr
+
+
+def capture_context(
+    source: str = "ocr",
+    layout: dict | None = None,
+) -> tuple[str, Image.Image | None]:
+    source = normalize_capture(source)
+    image, dpi = grab_foreground_window()
+    ocr_text = ""
+    pane = None
+    if source in {"ocr", "both"} and image is not None:
+        pane = crop_chat_pane(image, layout, dpi)
+        items = ocr_image(pane)
+        title = guess_title(items, pane.size[0], pane.size[1])
+        incoming = float((layout or {}).get("incoming_max_x") or 0.48)
+        outgoing = float((layout or {}).get("outgoing_min_x") or 0.52)
+        body = parse_chat(items, pane.size[0], incoming, outgoing)
+        ocr_text = f"[会话] {title}\n{body}" if title and body else (body or title)
+    clip = clipboard_text() if source in {"clipboard", "both"} else ""
+    text = select_capture_text(ocr=ocr_text, clipboard=clip, source=source)
+    shot = pane if source != "clipboard" else image
+    return text, shot or image
