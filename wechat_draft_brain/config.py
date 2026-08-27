@@ -6,7 +6,7 @@ from pathlib import Path
 
 import yaml
 
-from wechat_draft_brain.paths import DEFAULT_CONFIG
+from wechat_draft_brain.paths import DEFAULT_CONFIG, USER_CONFIG
 
 
 def _read_yaml(path: Path) -> dict:
@@ -14,22 +14,6 @@ def _read_yaml(path: Path) -> dict:
         return {}
     with path.open(encoding="utf-8") as f:
         return yaml.safe_load(f) or {}
-
-
-def load_config() -> dict:
-    cfg = _read_yaml(DEFAULT_CONFIG)
-    llm = cfg.setdefault("llm", {})
-    llm["base_url"] = (
-        llm.get("base_url")
-        or os.environ.get("OPENAI_BASE_URL")
-        or "https://api.openai.com/v1"
-    )
-    llm["api_key"] = llm.get("api_key") or os.environ.get("OPENAI_API_KEY") or ""
-    llm["model"] = os.environ.get("DRAFT_MODEL") or llm.get("model") or "gpt-4o-mini"
-    adb_env = os.environ.get("ADB_PATH")
-    if adb_env:
-        cfg.setdefault("adb", {})["path"] = adb_env
-    return cfg
 
 
 def deep_merge(base: dict, overlay: dict) -> dict:
@@ -40,3 +24,41 @@ def deep_merge(base: dict, overlay: dict) -> dict:
         else:
             out[k] = v
     return out
+
+
+def load_config() -> dict:
+    cfg = deep_merge(_read_yaml(DEFAULT_CONFIG), _read_yaml(USER_CONFIG))
+    llm = cfg.setdefault("llm", {})
+    llm["base_url"] = (
+        os.environ.get("OPENAI_BASE_URL")
+        or llm.get("base_url")
+        or "https://api.openai.com/v1"
+    )
+    llm["api_key"] = os.environ.get("OPENAI_API_KEY") or llm.get("api_key") or ""
+    llm["model"] = os.environ.get("DRAFT_MODEL") or llm.get("model") or "gpt-4o-mini"
+    cfg.setdefault("hotkey", "<ctrl>+<alt>+w")
+    return cfg
+
+
+def save_user_settings(
+    *,
+    hotkey: str | None = None,
+    api_key: str | None = None,
+    base_url: str | None = None,
+    model: str | None = None,
+) -> None:
+    data = _read_yaml(USER_CONFIG)
+    if hotkey is not None:
+        data["hotkey"] = hotkey.strip() or "<ctrl>+<alt>+w"
+    llm = data.setdefault("llm", {})
+    if api_key is not None:
+        llm["api_key"] = api_key.strip()
+    if base_url is not None:
+        llm["base_url"] = base_url.strip()
+    if model is not None:
+        llm["model"] = model.strip() or "gpt-4o-mini"
+    USER_CONFIG.parent.mkdir(parents=True, exist_ok=True)
+    USER_CONFIG.write_text(
+        yaml.safe_dump(data, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )

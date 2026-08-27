@@ -12,3 +12,5 @@ data/
 .idea/
 .vscode/
 会话同步.md
+dist/
+build/
