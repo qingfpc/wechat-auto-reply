@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from datetime import datetime
+from sqlite3 import Error as SQLiteError
 
 from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QCloseEvent, QGuiApplication, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -39,7 +41,12 @@ from wechat_draft_brain.config import (
     save_user_settings,
 )
 from wechat_draft_brain.paths import LAST_SHOT, USER_CONFIG, DATA_DIR, icon_path
-from wechat_draft_brain.pipeline import ingest_text, reload_config, restart_hotkeys
+from wechat_draft_brain.pipeline import (
+    clear_local_history,
+    ingest_text,
+    reload_config,
+    restart_hotkeys,
+)
 from wechat_draft_brain.store import init_db, list_drafts, list_events, update_draft
 
 _THEME_COLORS = {
@@ -181,6 +188,8 @@ class Worker(QThread):
 
 
 class SettingsDialog(QDialog):
+    history_cleared = Signal()
+
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self.setWindowTitle("设置")
@@ -206,6 +215,16 @@ class SettingsDialog(QDialog):
         self.api_key = QLineEdit(str(llm.get("api_key") or ""))
         self.api_key.setEchoMode(QLineEdit.Password)
         self.model = QLineEdit(str(llm.get("model") or "gpt-4o-mini"))
+        privacy = cfg.get("privacy") or {}
+        self.save_source_text = QCheckBox("在草稿库中保存聊天原文")
+        self.save_source_text.setChecked(bool(privacy.get("save_source_text", True)))
+        self.save_last_screenshot = QCheckBox("保存最近一次 OCR 截图")
+        self.save_last_screenshot.setChecked(
+            bool(privacy.get("save_last_screenshot", True))
+        )
+        self.clear_history_btn = QPushButton("清除草稿、日志和截图…")
+        self.clear_history_btn.setObjectName("ghost")
+        self.clear_history_btn.clicked.connect(self.clear_history_data)
         hint = QLabel(f"密钥只存在本机\n{USER_CONFIG}")
         hint.setObjectName("fine")
         hint.setWordWrap(True)
@@ -215,6 +234,9 @@ class SettingsDialog(QDialog):
         form.addRow("接口地址", self.base_url)
         form.addRow("API Key", self.api_key)
         form.addRow("模型", self.model)
+        form.addRow("聊天原文", self.save_source_text)
+        form.addRow("末帧截图", self.save_last_screenshot)
+        form.addRow("本地历史", self.clear_history_btn)
         if config_result.warnings:
             warning = QLabel("\n".join(config_result.warnings))
             warning.setObjectName("risk")
@@ -234,10 +256,34 @@ class SettingsDialog(QDialog):
             model=self.model.text(),
             capture=str(self.capture.currentData() or "ocr"),
             theme=str(self.theme.currentData() or "dark"),
+            save_source_text=self.save_source_text.isChecked(),
+            save_last_screenshot=self.save_last_screenshot.isChecked(),
         )
         reload_config()
         restart_hotkeys()
         apply_theme()
+
+    def clear_history_data(self) -> None:
+        answer = QMessageBox.question(
+            self,
+            "清除本地历史",
+            "将删除草稿、聊天原文、事件日志、快捷键去重记录和末帧截图。设置与 API Key 会保留。",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        try:
+            removed = clear_local_history()
+        except (OSError, SQLiteError) as exc:
+            QMessageBox.warning(self, "夜班台", f"清理失败：{exc}")
+            return
+        self.history_cleared.emit()
+        QMessageBox.information(
+            self,
+            "夜班台",
+            f"已清除 {removed['drafts']} 条草稿和 {removed['events']} 条日志。",
+        )
 
 
 class DraftCard(QFrame):
@@ -458,6 +504,7 @@ class MainWindow(QMainWindow):
 
     def open_settings(self) -> None:
         dlg = SettingsDialog(self)
+        dlg.history_cleared.connect(lambda: self.refresh(force=True))
         if dlg.exec() == QDialog.Accepted:
             try:
                 dlg.apply()

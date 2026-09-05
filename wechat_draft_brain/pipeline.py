@@ -10,6 +10,7 @@ from wechat_draft_brain.paths import LAST_SHOT
 from wechat_draft_brain.store import (
     auto_sent_last_hour,
     claim_capture,
+    clear_history,
     init_db,
     insert_draft,
     kv_get,
@@ -47,7 +48,28 @@ def reload_config() -> dict[str, Any]:
     result = load_config_result()
     _cfg = result.config
     _config_warnings = list(result.warnings)
+    enforce_privacy_settings()
     return _cfg
+
+
+def _privacy_flags() -> dict[str, bool]:
+    privacy = _cfg.get("privacy") or {}
+    return {
+        "save_source_text": bool(privacy.get("save_source_text", True)),
+        "save_last_screenshot": bool(privacy.get("save_last_screenshot", True)),
+    }
+
+
+def enforce_privacy_settings() -> None:
+    if not _privacy_flags()["save_last_screenshot"]:
+        LAST_SHOT.unlink(missing_ok=True)
+
+
+def clear_local_history() -> dict[str, int | bool]:
+    screenshot_removed = LAST_SHOT.exists()
+    LAST_SHOT.unlink(missing_ok=True)
+    counts = clear_history()
+    return {**counts, "screenshot_removed": screenshot_removed}
 
 
 def current_flags() -> dict[str, Any]:
@@ -58,6 +80,7 @@ def current_flags() -> dict[str, Any]:
         "model": (_cfg.get("llm") or {}).get("model") or "gpt-4o-mini",
         "last_shot": str(LAST_SHOT) if LAST_SHOT.exists() else "",
         "capture": _cfg.get("capture") or "ocr",
+        "privacy": _privacy_flags(),
         "config_warnings": list(_config_warnings),
     }
 
@@ -69,7 +92,9 @@ def _save_result(result, mode: str, sent: bool, status: str) -> int:
             "contact": result.contact,
             "scene": result.scene,
             "action": result.action,
-            "source_text": result.source_text,
+            "source_text": (
+                result.source_text if _privacy_flags()["save_source_text"] else ""
+            ),
             "drafts": result.drafts,
             "risks": result.risks,
             "reason": result.reason,
@@ -133,7 +158,7 @@ def ingest_hotkey() -> dict[str, Any]:
         msg = "这条消息刚刚已经生成过草稿。"
         log_event(msg, "warn")
         return {"ok": False, "duplicate": True, "error": msg}
-    if image is not None:
+    if image is not None and _privacy_flags()["save_last_screenshot"]:
         LAST_SHOT.parent.mkdir(parents=True, exist_ok=True)
         image.save(LAST_SHOT)
     if not text:
@@ -189,6 +214,7 @@ def restart_hotkeys() -> None:
 
 def start_background() -> None:
     init_db()
+    enforce_privacy_settings()
     for warning in _config_warnings:
         log_event(warning, "warn")
     if kv_get("mode") is None:

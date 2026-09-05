@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -6,7 +5,7 @@ from wechat_draft_brain import config
 
 
 def _config_paths(monkeypatch):
-    temp = TemporaryDirectory(dir=os.environ.get("APPDATA"))
+    temp = TemporaryDirectory()
     root = Path(temp.name)
     default_path = root / "default.yaml"
     user_path = root / "user.yaml"
@@ -105,3 +104,48 @@ def test_save_refuses_invalid_llm_section(monkeypatch):
         else:
             raise AssertionError("invalid llm section should not be overwritten")
         assert user_path.read_text(encoding="utf-8") == original
+
+
+def test_privacy_defaults_are_enabled(monkeypatch):
+    temp, _ = _config_paths(monkeypatch)
+    with temp:
+        result = config.load_config_result()
+
+        assert result.config["privacy"] == {
+            "save_source_text": True,
+            "save_last_screenshot": True,
+        }
+
+
+def test_save_user_privacy_settings(monkeypatch):
+    temp, user_path = _config_paths(monkeypatch)
+    with temp:
+        config.save_user_settings(
+            save_source_text=False,
+            save_last_screenshot=False,
+        )
+
+        result = config.load_config_result()
+
+        assert result.config["privacy"] == {
+            "save_source_text": False,
+            "save_last_screenshot": False,
+        }
+        assert "save_source_text: false" in user_path.read_text(encoding="utf-8")
+
+
+def test_invalid_privacy_settings_use_safe_defaults(monkeypatch):
+    temp, user_path = _config_paths(monkeypatch)
+    with temp:
+        user_path.write_text(
+            "privacy:\n  save_source_text: disabled\n  save_last_screenshot: 1\n",
+            encoding="utf-8",
+        )
+
+        result = config.load_config_result()
+
+        assert result.config["privacy"] == {
+            "save_source_text": True,
+            "save_last_screenshot": True,
+        }
+        assert len(result.warnings) == 2

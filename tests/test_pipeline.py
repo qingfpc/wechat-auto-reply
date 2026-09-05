@@ -1,3 +1,6 @@
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
 from wechat_draft_brain import pipeline
 from wechat_draft_brain.brain import BrainResult
 from wechat_draft_brain.chat_parser import ChatMessage
@@ -116,3 +119,98 @@ def test_ingest_text_persists_and_logs_llm_fallback(monkeypatch):
     assert events == [
         ("拟稿 #7 寒暄 → queue / 老高 / 规则；已降级：模型连接失败", "warn")
     ]
+
+
+def test_ingest_text_can_avoid_persisting_chat_source(monkeypatch):
+    saved = {}
+    result = BrainResult(
+        contact="老高",
+        scene="smalltalk",
+        confidence=0.8,
+        action="queue",
+        risks=[],
+        drafts=["在的"],
+        reason="只出草稿",
+        source_text="对方: 在吗",
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_cfg",
+        {"privacy": {"save_source_text": False, "save_last_screenshot": True}},
+    )
+    monkeypatch.setattr(pipeline, "run_brain", lambda *args, **kwargs: result)
+    monkeypatch.setattr(pipeline, "auto_sent_last_hour", lambda: 0)
+    monkeypatch.setattr(
+        pipeline, "insert_draft", lambda row: saved.update(row) or 8
+    )
+    monkeypatch.setattr(pipeline, "log_event", lambda *args, **kwargs: None)
+
+    payload = pipeline.ingest_text("对方: 在吗", contact="老高")
+
+    assert saved["source_text"] == ""
+    assert payload["source_text"] == "对方: 在吗"
+
+
+def test_hotkey_does_not_save_screenshot_when_disabled(monkeypatch):
+    saved_paths = []
+
+    class Image:
+        def save(self, path):
+            saved_paths.append(path)
+
+    monkeypatch.setattr(
+        pipeline,
+        "_cfg",
+        {
+            "capture": "clipboard",
+            "layout": {},
+            "privacy": {"save_source_text": True, "save_last_screenshot": False},
+        },
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "capture_context",
+        lambda **kwargs: CaptureResult("在吗", Image(), used_source="clipboard"),
+    )
+    monkeypatch.setattr(pipeline, "ingest_text", lambda *args, **kwargs: {"ok": True})
+
+    assert pipeline.ingest_hotkey() == {"ok": True}
+    assert saved_paths == []
+
+
+def test_clear_local_history_removes_last_screenshot(monkeypatch):
+    with TemporaryDirectory() as dirname:
+        last_shot = Path(dirname) / "last_screen.png"
+        last_shot.write_bytes(b"image")
+        monkeypatch.setattr(pipeline, "LAST_SHOT", last_shot)
+        monkeypatch.setattr(
+            pipeline,
+            "clear_history",
+            lambda: {"drafts": 2, "events": 3, "capture_claims": 1},
+        )
+
+        removed = pipeline.clear_local_history()
+
+        assert removed == {
+            "drafts": 2,
+            "events": 3,
+            "capture_claims": 1,
+            "screenshot_removed": True,
+        }
+        assert not last_shot.exists()
+
+
+def test_enforce_privacy_removes_existing_screenshot(monkeypatch):
+    with TemporaryDirectory() as dirname:
+        last_shot = Path(dirname) / "last_screen.png"
+        last_shot.write_bytes(b"image")
+        monkeypatch.setattr(pipeline, "LAST_SHOT", last_shot)
+        monkeypatch.setattr(
+            pipeline,
+            "_cfg",
+            {"privacy": {"save_source_text": True, "save_last_screenshot": False}},
+        )
+
+        pipeline.enforce_privacy_settings()
+
+        assert not last_shot.exists()

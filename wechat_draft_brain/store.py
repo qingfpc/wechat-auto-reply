@@ -124,6 +124,24 @@ def list_events(limit: int = 40) -> list[dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
+def clear_history() -> dict[str, int]:
+    """清除本地会话历史，保留 kv 中的运行设置。"""
+    with db() as conn:
+        conn.execute("PRAGMA secure_delete = ON")
+        counts = {
+            "drafts": int(conn.execute("SELECT COUNT(*) FROM drafts").fetchone()[0]),
+            "events": int(conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]),
+            "capture_claims": int(
+                conn.execute("SELECT COUNT(*) FROM capture_claims").fetchone()[0]
+            ),
+        }
+        conn.execute("DELETE FROM drafts")
+        conn.execute("DELETE FROM events")
+        conn.execute("DELETE FROM capture_claims")
+        conn.execute("DELETE FROM sqlite_sequence WHERE name IN ('drafts', 'events')")
+    return counts
+
+
 def insert_draft(row: dict[str, Any]) -> int:
     with db() as conn:
         cur = conn.execute(

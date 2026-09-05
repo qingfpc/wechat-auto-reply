@@ -88,6 +88,13 @@ def _number(value, default: float, field_name: str, warnings: list[str]) -> floa
     return number
 
 
+def _boolean(value, default: bool, field_name: str, warnings: list[str]) -> bool:
+    if isinstance(value, bool):
+        return value
+    warnings.append(f"配置项 {field_name} 不是有效布尔值，已使用默认值。")
+    return default
+
+
 def load_config_result() -> ConfigLoadResult:
     defaults, warnings = _read_yaml(DEFAULT_CONFIG, "默认配置")
     user, user_warnings = _read_yaml(USER_CONFIG, "用户配置")
@@ -151,6 +158,27 @@ def load_config_result() -> ConfigLoadResult:
         _number(policy.get("max_auto_per_hour", 20), 20.0, "policy.max_auto_per_hour", warnings)
     )
     cfg["policy"] = policy
+
+    privacy = cfg.get("privacy")
+    if privacy is None:
+        privacy = {}
+    elif not isinstance(privacy, dict):
+        warnings.append("配置项 privacy 必须是对象，已使用默认值。")
+        privacy = {}
+    cfg["privacy"] = {
+        "save_source_text": _boolean(
+            privacy.get("save_source_text", True),
+            True,
+            "privacy.save_source_text",
+            warnings,
+        ),
+        "save_last_screenshot": _boolean(
+            privacy.get("save_last_screenshot", True),
+            True,
+            "privacy.save_last_screenshot",
+            warnings,
+        ),
+    }
     return ConfigLoadResult(cfg, tuple(warnings))
 
 
@@ -166,6 +194,8 @@ def save_user_settings(
     model: str | None = None,
     capture: str | None = None,
     theme: str | None = None,
+    save_source_text: bool | None = None,
+    save_last_screenshot: bool | None = None,
 ) -> None:
     data, warnings = _read_yaml(USER_CONFIG, "用户配置")
     if warnings:
@@ -188,6 +218,16 @@ def save_user_settings(
         llm["base_url"] = base_url.strip()
     if model is not None:
         llm["model"] = model.strip() or "gpt-4o-mini"
+    privacy = data.get("privacy")
+    if privacy is None:
+        privacy = {}
+        data["privacy"] = privacy
+    elif not isinstance(privacy, dict):
+        raise ValueError("用户配置中的 privacy 不是对象，无法安全保存。")
+    if save_source_text is not None:
+        privacy["save_source_text"] = bool(save_source_text)
+    if save_last_screenshot is not None:
+        privacy["save_last_screenshot"] = bool(save_last_screenshot)
     USER_CONFIG.parent.mkdir(parents=True, exist_ok=True)
     USER_CONFIG.write_text(
         yaml.safe_dump(data, allow_unicode=True, sort_keys=False),

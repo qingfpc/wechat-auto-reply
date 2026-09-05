@@ -99,3 +99,22 @@ def test_capture_claim_persists_until_ttl_expires(monkeypatch):
         assert store.claim_capture("same-message", 10, now=100.0)
         assert not store.claim_capture("same-message", 10, now=105.0)
         assert store.claim_capture("same-message", 10, now=111.0)
+
+
+def test_clear_history_preserves_kv_settings(monkeypatch):
+    with TemporaryDirectory() as dirname:
+        _use_temp_db(monkeypatch, dirname)
+        store.init_db()
+        store.kv_set("mode", "copilot")
+        store.insert_draft({"source_text": "对方: 在吗", "drafts": ["在的"]})
+        store.log_event("测试日志")
+        assert store.claim_capture("message", 10, now=100.0)
+
+        removed = store.clear_history()
+
+        assert removed == {"drafts": 1, "events": 1, "capture_claims": 1}
+        assert store.list_drafts() == []
+        assert store.list_events() == []
+        assert store.kv_get("mode") == "copilot"
+        assert store.claim_capture("message", 10, now=101.0)
+        assert store.insert_draft({"drafts": ["新的"]}) == 1
