@@ -1,7 +1,9 @@
 from PIL import Image
 
 from wechat_draft_brain.config import normalize_capture, normalize_theme
+from wechat_draft_brain.chat_parser import ChatMessage
 from wechat_draft_brain.vision import (
+    CaptureResult,
     capture_context,
     chat_pane_box,
     detect_sidebar_split,
@@ -167,4 +169,33 @@ def test_capture_includes_title_when_there_is_an_incoming_message(monkeypatch):
     assert result.text == "[会话] 测试会话\n对方: 在吗"
     assert result.contact == "测试会话"
     assert [message.role for message in result.messages] == ["incoming"]
+
+
+def test_latest_actionable_message_skips_system_and_unknown():
+    incoming = ChatMessage("incoming", "text", "在吗")
+    system = ChatMessage("system", "text", "撤回了一条消息")
+    unknown = ChatMessage("unknown", "unknown", "[文字识别不清]")
+    result = CaptureResult("", None, messages=[incoming, system, unknown])
+
+    assert result.latest_actionable_message is incoming
+
+
+def test_capture_rejects_old_incoming_when_latest_message_is_outgoing(monkeypatch):
+    image = Image.new("RGB", (800, 500), (30, 30, 30))
+    monkeypatch.setattr("wechat_draft_brain.vision.grab_foreground_window", lambda: (image, 1.0))
+    monkeypatch.setattr("wechat_draft_brain.vision.crop_chat_pane", lambda value, layout, dpi: value)
+    monkeypatch.setattr(
+        "wechat_draft_brain.vision.ocr_image",
+        lambda value: [
+            _item("测试会话", 40, 50),
+            _item("在吗", 100, 140),
+            _item("我刚回复过", 700, 230),
+        ],
+    )
+
+    result = capture_context("ocr", {"header_px": 78})
+
+    assert [message.role for message in result.messages] == ["incoming", "outgoing"]
+    assert result.latest_actionable_message is result.messages[-1]
+    assert result.text == ""
 

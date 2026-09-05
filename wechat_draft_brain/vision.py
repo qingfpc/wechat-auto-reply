@@ -30,6 +30,17 @@ class CaptureResult:
     is_group: bool = False
     warnings: list[str] = field(default_factory=list)
 
+    @property
+    def latest_actionable_message(self) -> ChatMessage | None:
+        return latest_actionable_message(self.messages)
+
+
+def latest_actionable_message(messages: list[ChatMessage]) -> ChatMessage | None:
+    for message in reversed(messages):
+        if message.role in {"incoming", "outgoing"} and message.kind != "unknown":
+            return message
+    return None
+
 
 def get_ocr():
     global _ocr
@@ -252,8 +263,8 @@ def capture_context(
             min_score=float((layout or {}).get("ocr_min_score") or 0.75),
         )
         body = render_chat(messages)
-        has_reply_target = any(message.role == "incoming" for message in messages)
-        if body and has_reply_target:
+        latest = latest_actionable_message(messages)
+        if body and latest is not None and latest.role == "incoming":
             ocr_text = f"[会话] {title}\n{body}" if title else body
     clip = clipboard_text() if source in {"clipboard", "both"} else ""
     text = select_capture_text(ocr=ocr_text, clipboard=clip, source=source)
