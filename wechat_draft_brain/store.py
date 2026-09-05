@@ -11,6 +11,50 @@ from wechat_draft_brain.paths import DATA_DIR, DB_PATH
 
 _lock = threading.Lock()
 
+CURRENT_SCHEMA_VERSION = 1
+
+_MIGRATIONS: dict[int, tuple[str, ...]] = {
+    1: (
+        """
+        CREATE TABLE IF NOT EXISTS kv (
+          k TEXT PRIMARY KEY,
+          v TEXT NOT NULL
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS drafts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          created_at REAL NOT NULL,
+          mode TEXT NOT NULL,
+          contact TEXT,
+          scene TEXT,
+          action TEXT,
+          source_text TEXT,
+          drafts_json TEXT,
+          risks_json TEXT,
+          reason TEXT,
+          status TEXT NOT NULL DEFAULT 'pending',
+          chosen_text TEXT,
+          sent INTEGER NOT NULL DEFAULT 0
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          created_at REAL NOT NULL,
+          level TEXT NOT NULL,
+          message TEXT NOT NULL
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS capture_claims (
+          fingerprint TEXT PRIMARY KEY,
+          claimed_at REAL NOT NULL
+        )
+        """,
+    ),
+}
+
 
 def _connect() -> sqlite3.Connection:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -33,39 +77,16 @@ def db() -> Iterator[sqlite3.Connection]:
 
 def init_db() -> None:
     with db() as conn:
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS kv (
-              k TEXT PRIMARY KEY,
-              v TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS drafts (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              created_at REAL NOT NULL,
-              mode TEXT NOT NULL,
-              contact TEXT,
-              scene TEXT,
-              action TEXT,
-              source_text TEXT,
-              drafts_json TEXT,
-              risks_json TEXT,
-              reason TEXT,
-              status TEXT NOT NULL DEFAULT 'pending',
-              chosen_text TEXT,
-              sent INTEGER NOT NULL DEFAULT 0
-            );
-            CREATE TABLE IF NOT EXISTS events (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              created_at REAL NOT NULL,
-              level TEXT NOT NULL,
-              message TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS capture_claims (
-              fingerprint TEXT PRIMARY KEY,
-              claimed_at REAL NOT NULL
-            );
-            """
-        )
+        row = conn.execute("PRAGMA user_version").fetchone()
+        current = int(row[0] if row else 0)
+        if current > CURRENT_SCHEMA_VERSION:
+            raise RuntimeError(
+                f"数据库版本 {current} 高于程序支持的 {CURRENT_SCHEMA_VERSION}，请升级程序。"
+            )
+        for version in range(current + 1, CURRENT_SCHEMA_VERSION + 1):
+            for statement in _MIGRATIONS[version]:
+                conn.execute(statement)
+            conn.execute(f"PRAGMA user_version = {version}")
 
 
 def kv_get(key: str, default: str | None = None) -> str | None:
