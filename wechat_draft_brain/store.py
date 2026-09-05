@@ -11,7 +11,7 @@ from wechat_draft_brain.paths import DATA_DIR, DB_PATH
 
 _lock = threading.Lock()
 
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 2
 
 _MIGRATIONS: dict[int, tuple[str, ...]] = {
     1: (
@@ -52,6 +52,10 @@ _MIGRATIONS: dict[int, tuple[str, ...]] = {
           claimed_at REAL NOT NULL
         )
         """,
+    ),
+    2: (
+        "ALTER TABLE drafts ADD COLUMN generation_source TEXT NOT NULL DEFAULT 'rules'",
+        "ALTER TABLE drafts ADD COLUMN fallback_reason TEXT",
     ),
 }
 
@@ -126,8 +130,9 @@ def insert_draft(row: dict[str, Any]) -> int:
             """
             INSERT INTO drafts(
               created_at, mode, contact, scene, action, source_text,
-              drafts_json, risks_json, reason, status, sent
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+              drafts_json, risks_json, reason, status, sent,
+              generation_source, fallback_reason
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 time.time(),
@@ -141,6 +146,8 @@ def insert_draft(row: dict[str, Any]) -> int:
                 row.get("reason"),
                 row.get("status") or "pending",
                 1 if row.get("sent") else 0,
+                row.get("generation_source") or "rules",
+                row.get("fallback_reason") or None,
             ),
         )
         return int(cur.lastrowid)

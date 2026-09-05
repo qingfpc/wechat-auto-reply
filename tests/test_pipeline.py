@@ -1,4 +1,5 @@
 from wechat_draft_brain import pipeline
+from wechat_draft_brain.brain import BrainResult
 from wechat_draft_brain.chat_parser import ChatMessage
 from wechat_draft_brain.vision import CaptureResult
 
@@ -80,3 +81,38 @@ def test_startup_writes_config_warnings_to_event_log(monkeypatch):
     pipeline.start_background()
 
     assert events == [("用户配置无法读取", "warn")]
+
+
+def test_ingest_text_persists_and_logs_llm_fallback(monkeypatch):
+    saved = {}
+    events = []
+    result = BrainResult(
+        contact="老高",
+        scene="smalltalk",
+        confidence=0.8,
+        action="queue",
+        risks=[],
+        drafts=["在的"],
+        reason="快捷键拟稿模式：只出草稿，不发送。",
+        source_text="对方: 在吗",
+        generation_source="rules",
+        fallback_reason="模型连接失败",
+    )
+    monkeypatch.setattr(pipeline, "run_brain", lambda *args, **kwargs: result)
+    monkeypatch.setattr(pipeline, "auto_sent_last_hour", lambda: 0)
+    monkeypatch.setattr(
+        pipeline, "insert_draft", lambda row: saved.update(row) or 7
+    )
+    monkeypatch.setattr(
+        pipeline, "log_event", lambda message, level="info": events.append((message, level))
+    )
+
+    payload = pipeline.ingest_text("对方: 在吗", contact="老高")
+
+    assert saved["generation_source"] == "rules"
+    assert saved["fallback_reason"] == "模型连接失败"
+    assert payload["generation_source"] == "rules"
+    assert payload["fallback_reason"] == "模型连接失败"
+    assert events == [
+        ("拟稿 #7 寒暄 → queue / 老高 / 规则；已降级：模型连接失败", "warn")
+    ]

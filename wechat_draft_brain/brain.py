@@ -36,6 +36,8 @@ class BrainResult:
     drafts: list[str]
     reason: str
     source_text: str
+    generation_source: str = "rules"
+    fallback_reason: str = ""
     contact_guess: str = ""
     extra: dict = field(default_factory=dict)
 
@@ -113,11 +115,11 @@ def _last_incoming(source_text: str) -> str:
     return ""
 
 
-def _llm_drafts(cfg: dict, scene: str, source_text: str) -> list[str] | None:
+def _llm_drafts(cfg: dict, scene: str, source_text: str) -> tuple[list[str] | None, str]:
     llm = cfg.get("llm") or {}
     api_key = llm.get("api_key")
     if not api_key:
-        return None
+        return None, ""
     prompt = (
         "你在帮用户拟微信回复。只根据对话写出3条短回复，像真人手机打字："
         "短、口语、不要排比、不要客服腔。每条一行，不要编号。\n"
@@ -141,10 +143,22 @@ def _llm_drafts(cfg: dict, scene: str, source_text: str) -> list[str] | None:
         )
         resp.raise_for_status()
         text = resp.json()["choices"][0]["message"]["content"]
+    except httpx.TimeoutException:
+        return None, "模型请求超时"
+    except httpx.HTTPStatusError as exc:
+        return None, f"模型接口返回 HTTP {exc.response.status_code}"
+    except httpx.RequestError:
+        return None, "模型连接失败"
+    except (KeyError, TypeError, ValueError):
+        return None, "模型响应格式不正确"
     except Exception:
-        return None
+        return None, "模型调用出现未知错误"
+    if not isinstance(text, str):
+        return None, "模型响应格式不正确"
     lines = [ln.strip(" -•\t") for ln in text.splitlines() if ln.strip()]
-    return lines[:3] or None
+    if not lines:
+        return None, "模型未返回有效草稿"
+    return lines[:3], ""
 
 
 def run_brain(
@@ -171,9 +185,18 @@ def run_brain(
         sent_last_hour=sent_last_hour,
         max_auto_per_hour=max_auto,
     )
-    drafts = _llm_drafts(cfg, scene, source_text) or _heuristic_drafts(scene, last_line)
     if action == "ignore":
         drafts = []
+        generation_source = "none"
+        fallback_reason = ""
+    else:
+        llm_drafts, fallback_reason = _llm_drafts(cfg, scene, source_text)
+        if llm_drafts is not None:
+            drafts = llm_drafts
+            generation_source = "llm"
+        else:
+            drafts = _heuristic_drafts(scene, last_line)
+            generation_source = "rules"
     return BrainResult(
         contact=contact or "未知会话",
         scene=scene,
@@ -183,5 +206,7 @@ def run_brain(
         drafts=drafts,
         reason=reason,
         source_text=source_text,
+        generation_source=generation_source,
+        fallback_reason=fallback_reason,
         contact_guess=contact,
     )

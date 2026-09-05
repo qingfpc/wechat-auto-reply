@@ -63,6 +63,34 @@ def test_init_db_rejects_newer_schema(monkeypatch):
             raise AssertionError("应拒绝程序无法识别的新数据库版本")
 
 
+def test_init_db_upgrades_version_one_drafts_with_generation_metadata(monkeypatch):
+    with TemporaryDirectory() as dirname:
+        db_path = _use_temp_db(monkeypatch, dirname)
+        with closing(sqlite3.connect(db_path)) as conn:
+            for statement in store._MIGRATIONS[1]:
+                conn.execute(statement)
+            conn.execute("PRAGMA user_version = 1")
+            conn.execute(
+                """
+                INSERT INTO drafts(created_at, mode, drafts_json, risks_json, status, sent)
+                VALUES(1, 'copilot', '[]', '[]', 'pending', 0)
+                """
+            )
+            conn.commit()
+
+        store.init_db()
+
+        with closing(sqlite3.connect(db_path)) as conn:
+            columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(drafts)").fetchall()
+            }
+            row = conn.execute(
+                "SELECT generation_source, fallback_reason FROM drafts"
+            ).fetchone()
+        assert {"generation_source", "fallback_reason"} <= columns
+        assert row == ("rules", None)
+
+
 def test_capture_claim_persists_until_ttl_expires(monkeypatch):
     with TemporaryDirectory() as dirname:
         _use_temp_db(monkeypatch, dirname)

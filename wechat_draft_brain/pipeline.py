@@ -75,6 +75,8 @@ def _save_result(result, mode: str, sent: bool, status: str) -> int:
             "reason": result.reason,
             "status": status,
             "sent": sent,
+            "generation_source": result.generation_source,
+            "fallback_reason": result.fallback_reason,
         }
     )
 
@@ -92,9 +94,16 @@ def ingest_text(source_text: str, *, contact: str = "", mode: str | None = None)
     )
     status = "ignored" if result.action == "ignore" else "pending"
     draft_id = _save_result(result, use_mode, False, status)
-    log_event(
-        f"拟稿 #{draft_id} {SCENE_LABELS.get(result.scene, result.scene)} → {result.action} / {result.contact}"
+    source_label = {"llm": "模型", "rules": "规则", "none": "未生成"}.get(
+        result.generation_source, result.generation_source
     )
+    event_message = (
+        f"拟稿 #{draft_id} {SCENE_LABELS.get(result.scene, result.scene)} → "
+        f"{result.action} / {result.contact} / {source_label}"
+    )
+    if result.fallback_reason:
+        event_message += f"；已降级：{result.fallback_reason}"
+    log_event(event_message, "warn" if result.fallback_reason else "info")
     return {
         "id": draft_id,
         "contact": result.contact,
@@ -105,6 +114,8 @@ def ingest_text(source_text: str, *, contact: str = "", mode: str | None = None)
         "risks": result.risks,
         "drafts": result.drafts,
         "reason": result.reason,
+        "generation_source": result.generation_source,
+        "fallback_reason": result.fallback_reason,
         "source_text": result.source_text,
         "status": status,
         "sent": False,

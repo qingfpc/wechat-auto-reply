@@ -250,8 +250,14 @@ class DraftCard(QFrame):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 10, 12, 10)
         scene = SCENE_LABELS.get(row.get("scene") or "", row.get("scene") or "")
+        source_label = {
+            "llm": "模型草稿",
+            "rules": "规则草稿",
+            "none": "未生成草稿",
+        }.get(row.get("generation_source"), "规则草稿")
         meta = QLabel(
-            f"#{row.get('id')} · {row.get('contact') or '未知'} · {scene} · {row.get('status')}"
+            f"#{row.get('id')} · {row.get('contact') or '未知'} · {scene} · "
+            f"{source_label} · {row.get('status')}"
         )
         meta.setObjectName("meta")
         layout.addWidget(meta)
@@ -259,6 +265,12 @@ class DraftCard(QFrame):
         reason.setWordWrap(True)
         reason.setObjectName("risk" if row.get("risks") else "mute")
         layout.addWidget(reason)
+        fallback_reason = row.get("fallback_reason") or ""
+        if fallback_reason:
+            fallback = QLabel(f"模型已降级：{fallback_reason}")
+            fallback.setObjectName("risk")
+            fallback.setWordWrap(True)
+            layout.addWidget(fallback)
         src = (row.get("source_text") or "")[:280]
         if src:
             preview = QLabel(src)
