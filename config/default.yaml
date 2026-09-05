@@ -9,9 +9,13 @@ llm:
   model: gpt-4o-mini
 
 layout:
-  # 微信 PC 左侧会话列表大约这么宽（逻辑像素，会乘系统 DPI）。名单被拖得很宽时可加大。
+  # 聊天区左边界优先按背景色跳变自动检测；检测不到明显分界时才回落到 sidebar_px。
   sidebar_px: 360
+  sidebar_min_px: 150        # 自动检测的搜索下限
+  sidebar_min_contrast: 30   # 跳变强度低于此值视为检测失败
   sidebar_max_ratio: 0.42
+  header_px: 78              # 会话标题栏高度，这条带里的文字不进正文
+  ocr_min_score: 0.75        # 低于该置信度的文本只保留“识别不清”占位
   chat_bottom: 0.90
   incoming_max_x: 0.48
   outgoing_min_x: 0.52

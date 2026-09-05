@@ -7,6 +7,13 @@ from typing import Any
 import numpy as np
 from PIL import Image, ImageGrab
 
+from wechat_draft_brain.chat_parser import (
+    is_group_title,
+    looks_like_timestamp,
+    parse_chat,
+    parse_chat_items,
+    render_chat,
+)
 from wechat_draft_brain.config import normalize_capture
 
 _ocr = None
@@ -79,16 +86,45 @@ def find_red_badges(image: Image.Image, region: tuple[float, float, float, float
     return points
 
 
+def detect_sidebar_split(image: Image.Image, layout: dict | None = None) -> int | None:
+    """找会话列表和聊天区之间的背景色分界，返回聊天区左边界。
+
+    列表宽度会随用户拖动和窗口大小变化，固定像素值靠不住。按列取中位数颜色再看
+    相邻列的跳变，气泡只占部分高度，取中位数就能把它们压掉。跳变不明显时返回
+    None，由调用方回落到配置里的 sidebar_px。
+    """
+    layout = layout or {}
+    arr = np.asarray(image.convert("RGB"), dtype=np.int16)
+    height, width = arr.shape[0], arr.shape[1]
+    lo = int(layout.get("sidebar_min_px", 150))
+    hi = min(int(width * float(layout.get("sidebar_max_ratio", 0.42))), width - 1)
+    if hi - lo < 8:
+        return None
+    band = arr[int(height * 0.12) : int(height * 0.85), :, :]
+    if band.shape[0] < 8:
+        return None
+    columns = np.median(band, axis=0)
+    steps = np.abs(np.diff(columns, axis=0)).sum(axis=1)
+    window = steps[lo:hi]
+    if float(window.max()) < float(layout.get("sidebar_min_contrast", 30)):
+        return None
+    return lo + int(np.argmax(window)) + 1
+
+
 def chat_pane_box(
     width: int,
     height: int,
     layout: dict | None = None,
     dpi: float = 1.0,
+    sidebar_override: int | None = None,
 ) -> tuple[int, int, int, int]:
     """微信 PC 左侧是图标栏+会话列表，只保留右侧聊天区。"""
     layout = layout or {}
-    sidebar_px = float(layout.get("sidebar_px", 360))
-    left = int(round(sidebar_px * max(float(dpi) or 1.0, 0.75)))
+    if sidebar_override is not None:
+        left = int(sidebar_override)
+    else:
+        sidebar_px = float(layout.get("sidebar_px", 360))
+        left = int(round(sidebar_px * max(float(dpi) or 1.0, 0.75)))
     max_left = int(width * float(layout.get("sidebar_max_ratio", 0.42)))
     left = min(max(left, 0), max_left, max(width - 80, 0))
     top = int(height * float(layout.get("chat_top", 0.0)))
@@ -106,29 +142,13 @@ def crop_chat_pane(
     layout: dict | None = None,
     dpi: float = 1.0,
 ) -> Image.Image:
-    left, top, right, bottom = chat_pane_box(image.size[0], image.size[1], layout, dpi)
+    split = detect_sidebar_split(image, layout)
+    left, top, right, bottom = chat_pane_box(
+        image.size[0], image.size[1], layout, dpi, sidebar_override=split
+    )
     if left <= 0 and top <= 0 and right >= image.size[0] and bottom >= image.size[1]:
         return image
     return image.crop((left, top, right, bottom))
-
-
-def parse_chat(items: list[dict[str, Any]], width: int, incoming_max_x: float, outgoing_min_x: float) -> str:
-    lines = []
-    skip = ("发送", "按住 说话", "搜一搜", "视频通话", "语音通话", "搜索")
-    for it in items:
-        text = it["text"]
-        if not text or any(s in text for s in skip):
-            continue
-        if len(text) <= 5 and ":" in text and text.replace(":", "").replace("：", "").isdigit():
-            continue
-        ratio = it["x"] / max(width, 1)
-        if ratio <= incoming_max_x:
-            lines.append(f"对方: {text}")
-        elif ratio >= outgoing_min_x:
-            lines.append(f"我: {text}")
-        else:
-            lines.append(text)
-    return "\n".join(lines).strip()
 
 
 def guess_title(items: list[dict[str, Any]], width: int, height: int) -> str:
@@ -136,10 +156,11 @@ def guess_title(items: list[dict[str, Any]], width: int, height: int) -> str:
     for it in items:
         if it["top"] >= height * 0.14:
             continue
-        if not (0.04 * width < it["x"] < 0.62 * width):
+        # 裁剪准确时标题会紧贴聊天区左边缘，下限不能按会话列表还在的时候设
+        if not (0.005 * width < it["x"] < 0.62 * width):
             continue
         text = it["text"]
-        if text in skip or not (1 < len(text) < 20):
+        if text in skip or looks_like_timestamp(text) or not (1 < len(text) < 20):
             continue
         return text
     return ""
@@ -203,8 +224,21 @@ def capture_context(
         title = guess_title(items, pane.size[0], pane.size[1])
         incoming = float((layout or {}).get("incoming_max_x") or 0.48)
         outgoing = float((layout or {}).get("outgoing_min_x") or 0.52)
-        body = parse_chat(items, pane.size[0], incoming, outgoing)
-        ocr_text = f"[会话] {title}\n{body}" if title and body else (body or title)
+        header = float((layout or {}).get("header_px") or 78) * max(float(dpi) or 1.0, 0.75)
+        messages = parse_chat_items(
+            items,
+            pane.size[0],
+            incoming,
+            outgoing,
+            header_bottom=header,
+            image=pane,
+            is_group=is_group_title(title),
+            min_score=float((layout or {}).get("ocr_min_score") or 0.75),
+        )
+        body = render_chat(messages)
+        has_reply_target = any(message.role == "incoming" for message in messages)
+        if body and has_reply_target:
+            ocr_text = f"[会话] {title}\n{body}" if title else body
     clip = clipboard_text() if source in {"clipboard", "both"} else ""
     text = select_capture_text(ocr=ocr_text, clipboard=clip, source=source)
     shot = pane if source != "clipboard" else image

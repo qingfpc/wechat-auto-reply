@@ -107,10 +107,10 @@ def _heuristic_drafts(scene: str, last_line: str) -> list[str]:
 def _last_incoming(source_text: str) -> str:
     lines = [ln.strip() for ln in (source_text or "").splitlines() if ln.strip()]
     for ln in reversed(lines):
-        if ln.startswith("我:") or ln.startswith("我："):
+        if ln.startswith(("我:", "我：", "[会话]", "系统:", "系统：", "未知:", "未知：")):
             continue
         return ln.split(":", 1)[-1].split("：", 1)[-1].strip()
-    return source_text.strip()[-80:]
+    return ""
 
 
 def _llm_drafts(cfg: dict, scene: str, source_text: str) -> list[str] | None:

@@ -1,4 +1,4 @@
-from wechat_draft_brain.brain import classify_scene, decide_action, run_brain
+from wechat_draft_brain.brain import _last_incoming, classify_scene, decide_action, run_brain
 
 
 def test_money_is_queued():
@@ -36,3 +36,16 @@ def test_copilot_never_autosends():
     r = run_brain("在吗", {"llm": {}, "policy": {}}, mode="copilot", dry_run=True, auto_armed=True)
     assert r.action == "queue"
     assert r.drafts
+
+
+def test_last_incoming_skips_metadata_system_unknown_and_own_messages():
+    source = "\n".join(
+        [
+            "[会话] 测试群(3)",
+            "对方(小明): 在吗",
+            "我: 在的",
+            "系统: 小明撤回了一条消息",
+            "未知: [文字识别不清]",
+        ]
+    )
+    assert _last_incoming(source) == "在吗"

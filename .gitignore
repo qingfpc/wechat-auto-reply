@@ -4,6 +4,8 @@ __pycache__/
 .venv/
 data/
 *.png
+# 真实微信截图和基线记录含好友昵称与聊天内容，仓库公开，整个目录不入库
+tests/fixtures/
 *.sqlite3
 *.sqlite3-*
 *.db
