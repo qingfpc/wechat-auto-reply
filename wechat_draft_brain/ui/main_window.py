@@ -30,7 +30,14 @@ from PySide6.QtWidgets import (
 )
 
 from wechat_draft_brain.brain import SCENE_LABELS
-from wechat_draft_brain.config import CAPTURE_CHOICES, THEME_CHOICES, load_config, normalize_theme, save_user_settings
+from wechat_draft_brain.config import (
+    CAPTURE_CHOICES,
+    THEME_CHOICES,
+    load_config,
+    load_config_result,
+    normalize_theme,
+    save_user_settings,
+)
 from wechat_draft_brain.paths import LAST_SHOT, USER_CONFIG, DATA_DIR, icon_path
 from wechat_draft_brain.pipeline import ingest_text, reload_config, restart_hotkeys
 from wechat_draft_brain.store import init_db, list_drafts, list_events, update_draft
@@ -178,7 +185,8 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("设置")
         self.setMinimumWidth(440)
-        cfg = load_config()
+        config_result = load_config_result()
+        cfg = config_result.config
         llm = cfg.get("llm") or {}
         form = QFormLayout(self)
         self.hotkey = QLineEdit(str(cfg.get("hotkey") or "<ctrl>+<alt>+w"))
@@ -207,6 +215,11 @@ class SettingsDialog(QDialog):
         form.addRow("接口地址", self.base_url)
         form.addRow("API Key", self.api_key)
         form.addRow("模型", self.model)
+        if config_result.warnings:
+            warning = QLabel("\n".join(config_result.warnings))
+            warning.setObjectName("risk")
+            warning.setWordWrap(True)
+            form.addRow("配置警告", warning)
         form.addRow(hint)
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
@@ -434,7 +447,11 @@ class MainWindow(QMainWindow):
     def open_settings(self) -> None:
         dlg = SettingsDialog(self)
         if dlg.exec() == QDialog.Accepted:
-            dlg.apply()
+            try:
+                dlg.apply()
+            except (OSError, ValueError) as exc:
+                QMessageBox.warning(self, "夜班台", str(exc))
+                return
             self.refresh(force=True)
             QMessageBox.information(self, "夜班台", "设置已保存。密钥只写在本机用户目录。")
 

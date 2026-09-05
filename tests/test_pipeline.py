@@ -67,3 +67,16 @@ def test_clipboard_capture_does_not_claim_ocr_fingerprint(monkeypatch):
 
     assert pipeline.ingest_hotkey() == {"ok": True}
     assert claims == []
+
+
+def test_startup_writes_config_warnings_to_event_log(monkeypatch):
+    events = []
+    monkeypatch.setattr(pipeline, "_config_warnings", ["用户配置无法读取"])
+    monkeypatch.setattr(pipeline, "init_db", lambda: None)
+    monkeypatch.setattr(pipeline, "kv_get", lambda key: "copilot")
+    monkeypatch.setattr(pipeline, "log_event", lambda message, level: events.append((message, level)))
+    monkeypatch.setattr(pipeline, "start_hotkeys", lambda: None)
+
+    pipeline.start_background()
+
+    assert events == [("用户配置无法读取", "warn")]

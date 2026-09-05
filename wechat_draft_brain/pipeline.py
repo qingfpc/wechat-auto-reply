@@ -5,7 +5,7 @@ import threading
 from typing import Any
 
 from wechat_draft_brain.brain import SCENE_LABELS, run_brain
-from wechat_draft_brain.config import load_config
+from wechat_draft_brain.config import load_config_result
 from wechat_draft_brain.paths import LAST_SHOT
 from wechat_draft_brain.store import (
     auto_sent_last_hour,
@@ -18,7 +18,9 @@ from wechat_draft_brain.store import (
 )
 from wechat_draft_brain.vision import capture_context
 
-_cfg = load_config()
+_config_result = load_config_result()
+_cfg = _config_result.config
+_config_warnings = list(_config_result.warnings)
 _lock = threading.Lock()
 _hotkeys = None
 
@@ -41,8 +43,10 @@ def _capture_fingerprint(capture) -> str:
 
 
 def reload_config() -> dict[str, Any]:
-    global _cfg
-    _cfg = load_config()
+    global _cfg, _config_warnings
+    result = load_config_result()
+    _cfg = result.config
+    _config_warnings = list(result.warnings)
     return _cfg
 
 
@@ -54,6 +58,7 @@ def current_flags() -> dict[str, Any]:
         "model": (_cfg.get("llm") or {}).get("model") or "gpt-4o-mini",
         "last_shot": str(LAST_SHOT) if LAST_SHOT.exists() else "",
         "capture": _cfg.get("capture") or "ocr",
+        "config_warnings": list(_config_warnings),
     }
 
 
@@ -173,6 +178,8 @@ def restart_hotkeys() -> None:
 
 def start_background() -> None:
     init_db()
+    for warning in _config_warnings:
+        log_event(warning, "warn")
     if kv_get("mode") is None:
         kv_set("mode", "copilot")
     start_hotkeys()
