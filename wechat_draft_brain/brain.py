@@ -157,7 +157,8 @@ def run_brain(
     contact: str = "",
     sent_last_hour: int = 0,
 ) -> BrainResult:
-    scene, conf = classify_scene(source_text)
+    last_line = _last_incoming(source_text)
+    scene, conf = classify_scene(last_line)
     policy = cfg.get("policy") or {}
     auto_scenes = policy.get("auto_scenes") or ["smalltalk", "logistics"]
     max_auto = int(policy.get("max_auto_per_hour") or 20)
@@ -170,7 +171,6 @@ def run_brain(
         sent_last_hour=sent_last_hour,
         max_auto_per_hour=max_auto,
     )
-    last_line = _last_incoming(source_text)
     drafts = _llm_drafts(cfg, scene, source_text) or _heuristic_drafts(scene, last_line)
     if action == "ignore":
         drafts = []

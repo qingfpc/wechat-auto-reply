@@ -49,3 +49,47 @@ def test_last_incoming_skips_metadata_system_unknown_and_own_messages():
         ]
     )
     assert _last_incoming(source) == "在吗"
+
+
+def test_run_brain_classifies_only_latest_incoming_message():
+    source = "\n".join(
+        [
+            "[会话] 老高",
+            "对方: 你先转我三百",
+            "我: 我核对一下",
+            "对方: 在吗",
+        ]
+    )
+
+    result = run_brain(
+        source,
+        {"llm": {}, "policy": {}},
+        mode="copilot",
+        dry_run=True,
+        auto_armed=False,
+    )
+
+    assert result.scene == "smalltalk"
+    assert result.risks == []
+
+
+def test_run_brain_keeps_risk_when_latest_incoming_message_is_money():
+    source = "\n".join(
+        [
+            "[会话] 老高",
+            "对方: 在吗",
+            "我: 在的",
+            "对方: 你先转我三百",
+        ]
+    )
+
+    result = run_brain(
+        source,
+        {"llm": {}, "policy": {}},
+        mode="copilot",
+        dry_run=True,
+        auto_armed=False,
+    )
+
+    assert result.scene == "money"
+    assert result.risks == ["必须你确认后再发"]
