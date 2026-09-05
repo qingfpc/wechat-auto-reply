@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import threading
 from typing import Any
 
@@ -8,6 +9,7 @@ from wechat_draft_brain.config import load_config
 from wechat_draft_brain.paths import LAST_SHOT
 from wechat_draft_brain.store import (
     auto_sent_last_hour,
+    claim_capture,
     init_db,
     insert_draft,
     kv_get,
@@ -19,6 +21,23 @@ from wechat_draft_brain.vision import capture_context
 _cfg = load_config()
 _lock = threading.Lock()
 _hotkeys = None
+
+
+def _capture_fingerprint(capture) -> str:
+    message = capture.latest_actionable_message
+    if capture.used_source != "ocr" or message is None or message.role != "incoming":
+        return ""
+    normalize = lambda value: " ".join((value or "").split())
+    payload = "\x1f".join(
+        (
+            normalize(capture.contact),
+            "group" if capture.is_group else "private",
+            message.kind,
+            normalize(message.author),
+            normalize(message.text),
+        )
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def reload_config() -> dict[str, Any]:
@@ -92,6 +111,12 @@ def ingest_hotkey() -> dict[str, Any]:
     source = _cfg.get("capture") or "ocr"
     capture = capture_context(source=source, layout=_cfg.get("layout") or {})
     text, image = capture.text, capture.image
+    fingerprint = _capture_fingerprint(capture)
+    dedup_seconds = float(_cfg.get("capture_dedup_seconds") or 10)
+    if fingerprint and not claim_capture(fingerprint, dedup_seconds):
+        msg = "这条消息刚刚已经生成过草稿。"
+        log_event(msg, "warn")
+        return {"ok": False, "duplicate": True, "error": msg}
     if image is not None:
         LAST_SHOT.parent.mkdir(parents=True, exist_ok=True)
         image.save(LAST_SHOT)

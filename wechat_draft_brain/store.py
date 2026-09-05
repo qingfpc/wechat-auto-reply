@@ -60,6 +60,10 @@ def init_db() -> None:
               level TEXT NOT NULL,
               message TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS capture_claims (
+              fingerprint TEXT PRIMARY KEY,
+              claimed_at REAL NOT NULL
+            );
             """
         )
 
@@ -165,3 +169,21 @@ def auto_sent_last_hour() -> int:
             (since,),
         ).fetchone()
     return int(row["n"] if row else 0)
+
+
+def claim_capture(fingerprint: str, ttl_seconds: float, *, now: float | None = None) -> bool:
+    """原子占用一次 OCR 消息指纹；有效期内重复占用返回 False。"""
+    claimed_at = time.time() if now is None else float(now)
+    cutoff = claimed_at - max(float(ttl_seconds), 0.0)
+    with db() as conn:
+        conn.execute("DELETE FROM capture_claims WHERE claimed_at < ?", (cutoff,))
+        row = conn.execute(
+            "SELECT claimed_at FROM capture_claims WHERE fingerprint=?", (fingerprint,)
+        ).fetchone()
+        if row is not None:
+            return False
+        conn.execute(
+            "INSERT INTO capture_claims(fingerprint, claimed_at) VALUES(?,?)",
+            (fingerprint, claimed_at),
+        )
+    return True

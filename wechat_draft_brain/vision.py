@@ -29,6 +29,7 @@ class CaptureResult:
     messages: list[ChatMessage] = field(default_factory=list)
     is_group: bool = False
     warnings: list[str] = field(default_factory=list)
+    used_source: str = ""
 
     @property
     def latest_actionable_message(self) -> ChatMessage | None:
@@ -268,6 +269,9 @@ def capture_context(
             ocr_text = f"[会话] {title}\n{body}" if title else body
     clip = clipboard_text() if source in {"clipboard", "both"} else ""
     text = select_capture_text(ocr=ocr_text, clipboard=clip, source=source)
+    used_source = ""
+    if text:
+        used_source = "ocr" if ocr_text and source != "clipboard" else "clipboard"
     shot = pane if source != "clipboard" else image
     return CaptureResult(
         text=text,
@@ -275,4 +279,5 @@ def capture_context(
         contact=title,
         messages=messages,
         is_group=group_chat,
+        used_source=used_source,
     )

@@ -1,6 +1,7 @@
 mode: copilot
 hotkey: "<ctrl>+<alt>+w"
 capture: ocr            # ocr | clipboard | both；默认只 OCR，不读剪贴板
+capture_dedup_seconds: 10  # 同一会话、同一条收到消息的快捷键去重窗口
 theme: dark             # dark | light
 
 llm:
