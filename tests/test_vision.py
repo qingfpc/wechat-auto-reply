@@ -149,9 +149,10 @@ def test_capture_requires_an_incoming_message(monkeypatch):
         "wechat_draft_brain.vision.ocr_image",
         lambda value: [_item("测试会话", 40, 50), _item("我刚发过了", 700, 140)],
     )
-    text, shot = capture_context("ocr", {"header_px": 78})
-    assert text == ""
-    assert shot is image
+    result = capture_context("ocr", {"header_px": 78})
+    assert result.text == ""
+    assert result.image is image
+    assert result.contact == "测试会话"
 
 
 def test_capture_includes_title_when_there_is_an_incoming_message(monkeypatch):
@@ -162,6 +163,8 @@ def test_capture_includes_title_when_there_is_an_incoming_message(monkeypatch):
         "wechat_draft_brain.vision.ocr_image",
         lambda value: [_item("测试会话", 40, 50), _item("在吗", 100, 140)],
     )
-    text, _ = capture_context("ocr", {"header_px": 78})
-    assert text == "[会话] 测试会话\n对方: 在吗"
+    result = capture_context("ocr", {"header_px": 78})
+    assert result.text == "[会话] 测试会话\n对方: 在吗"
+    assert result.contact == "测试会话"
+    assert [message.role for message in result.messages] == ["incoming"]
 

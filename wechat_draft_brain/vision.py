@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import ctypes
 from ctypes import wintypes
+from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
 from PIL import Image, ImageGrab
 
 from wechat_draft_brain.chat_parser import (
+    ChatMessage,
     is_group_title,
     looks_like_timestamp,
     parse_chat,
@@ -17,6 +19,16 @@ from wechat_draft_brain.chat_parser import (
 from wechat_draft_brain.config import normalize_capture
 
 _ocr = None
+
+
+@dataclass
+class CaptureResult:
+    text: str
+    image: Image.Image | None
+    contact: str = ""
+    messages: list[ChatMessage] = field(default_factory=list)
+    is_group: bool = False
+    warnings: list[str] = field(default_factory=list)
 
 
 def get_ocr():
@@ -213,15 +225,19 @@ def select_capture_text(*, ocr: str, clipboard: str, source: str) -> str:
 def capture_context(
     source: str = "ocr",
     layout: dict | None = None,
-) -> tuple[str, Image.Image | None]:
+) -> CaptureResult:
     source = normalize_capture(source)
     image, dpi = grab_foreground_window()
     ocr_text = ""
     pane = None
+    title = ""
+    messages: list[ChatMessage] = []
+    group_chat = False
     if source in {"ocr", "both"} and image is not None:
         pane = crop_chat_pane(image, layout, dpi)
         items = ocr_image(pane)
         title = guess_title(items, pane.size[0], pane.size[1])
+        group_chat = is_group_title(title)
         incoming = float((layout or {}).get("incoming_max_x") or 0.48)
         outgoing = float((layout or {}).get("outgoing_min_x") or 0.52)
         header = float((layout or {}).get("header_px") or 78) * max(float(dpi) or 1.0, 0.75)
@@ -232,7 +248,7 @@ def capture_context(
             outgoing,
             header_bottom=header,
             image=pane,
-            is_group=is_group_title(title),
+            is_group=group_chat,
             min_score=float((layout or {}).get("ocr_min_score") or 0.75),
         )
         body = render_chat(messages)
@@ -242,4 +258,10 @@ def capture_context(
     clip = clipboard_text() if source in {"clipboard", "both"} else ""
     text = select_capture_text(ocr=ocr_text, clipboard=clip, source=source)
     shot = pane if source != "clipboard" else image
-    return text, shot or image
+    return CaptureResult(
+        text=text,
+        image=shot or image,
+        contact=title,
+        messages=messages,
+        is_group=group_chat,
+    )

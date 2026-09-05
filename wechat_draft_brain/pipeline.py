@@ -90,7 +90,8 @@ def ingest_text(source_text: str, *, contact: str = "", mode: str | None = None)
 
 def ingest_hotkey() -> dict[str, Any]:
     source = _cfg.get("capture") or "ocr"
-    text, image = capture_context(source=source, layout=_cfg.get("layout") or {})
+    capture = capture_context(source=source, layout=_cfg.get("layout") or {})
+    text, image = capture.text, capture.image
     if image is not None:
         LAST_SHOT.parent.mkdir(parents=True, exist_ok=True)
         image.save(LAST_SHOT)
@@ -103,7 +104,7 @@ def ingest_hotkey() -> dict[str, Any]:
             msg = "没有识别到对话。把微信窗口置于前台再按快捷键。"
         log_event(f"快捷键已触发，但未读到文字。{msg}", "warn")
         return {"ok": False, "error": msg}
-    return ingest_text(text, mode="copilot")
+    return ingest_text(text, contact=capture.contact, mode="copilot")
 
 
 def stop_hotkeys() -> None:
