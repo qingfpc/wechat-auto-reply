@@ -1,5 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 import os
+import sys
 
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
@@ -11,6 +12,9 @@ for pkg in ("rapidocr_onnxruntime", "onnxruntime", "cv2"):
     datas += pkg_datas
     binaries += pkg_binaries
     hiddenimports += pkg_hidden
+
+for dll_name in ("MSVCP140.dll", "MSVCP140_1.dll", "VCRUNTIME140.dll", "VCRUNTIME140_1.dll"):
+    binaries.append((os.path.join(sys.prefix, dll_name), "."))
 
 hiddenimports += collect_submodules("pynput")
 hiddenimports += [
@@ -63,6 +67,13 @@ a = Analysis(
     ],
     noarchive=False,
 )
+
+# Qt uses the Windows system ICU shim. A foreign icuuc.dll found on PATH (for
+# example Poppler's versioned ICU build) shadows that shim and makes QtCore fail
+# with ERROR_PROC_NOT_FOUND at startup.
+a.binaries = [
+    entry for entry in a.binaries if entry[0].lower() not in {"icuuc.dll", "icudt78.dll"}
+]
 
 pyz = PYZ(a.pure)
 
