@@ -16,3 +16,6 @@ tests/fixtures/
 会话同步.md
 dist/
 build/
+.coverage
+htmlcov/
+*.log
